@@ -1,0 +1,894 @@
+-- 1. Retrieve customers who ordered all available products. 
+
+SELECT c.customer_id, c.name
+FROM customers c
+JOIN orders o ON c.customer_id = o.customer_id
+JOIN order_items oi ON o.order_id = oi.order_id
+GROUP BY c.customer_id, c.name
+HAVING COUNT(DISTINCT oi.product_id) = (SELECT COUNT(*) FROM products);
+
+
+-- 2. List products that have never appeared in any order.
+
+SELECT p.product_id, p.product_name
+FROM products p
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM order_items oi
+    WHERE oi.product_id = p.product_id
+);
+
+
+-- 3. Find orders that contain only one item, but that item is the most expensive product.
+
+SELECT order_id
+FROM order_items
+WHERE product_id = (
+    SELECT product_id
+    FROM products
+    WHERE price = (SELECT MAX(price) FROM products)
+)
+GROUP BY order_id
+HAVING COUNT(*) = 1;
+
+
+-- 4. Identify customers whose first-ever order has more than 3 items.
+
+SELECT c.customer_id, c.name
+FROM (
+    SELECT o.customer_id,
+           o.order_id,
+           ROW_NUMBER() OVER (PARTITION BY o.customer_id ORDER BY o.order_date) AS rn
+    FROM orders o
+) first_order
+JOIN order_items oi ON first_order.order_id = oi.order_id
+JOIN customers c ON first_order.customer_id = c.customer_id
+WHERE rn = 1
+GROUP BY c.customer_id, c.name
+HAVING COUNT(*) > 3;
+
+
+-- 5. Find customers who placed orders but never made a payment.
+
+SELECT DISTINCT c.customer_id, c.name
+FROM customers c
+JOIN orders o ON c.customer_id = o.customer_id
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM payments p
+    WHERE p.order_id = o.order_id
+);
+
+
+-- 6. Retrieve orders that include both Mouse and Keyboard.
+
+SELECT o.order_id
+FROM orders o
+WHERE EXISTS (
+    SELECT 1
+    FROM order_items oi
+    JOIN products p ON oi.product_id = p.product_id
+    WHERE oi.order_id = o.order_id
+    AND LOWER(p.product_name) LIKE '%mouse%'
+)
+AND EXISTS (
+    SELECT 1
+    FROM order_items oi
+    JOIN products p ON oi.product_id = p.product_id
+    WHERE oi.order_id = o.order_id
+    AND LOWER(p.product_name) LIKE '%keyboard%'
+);
+
+
+-- 7. For each customer, list the total amount ordered compared with their total payments.
+
+WITH order_totals AS (
+    SELECT o.customer_id,
+           SUM(oi.quantity * p.price) AS total_ordered
+    FROM orders o
+    JOIN order_items oi ON o.order_id = oi.order_id
+    JOIN products p ON oi.product_id = p.product_id
+    GROUP BY o.customer_id
+),
+payment_totals AS (
+    SELECT o.customer_id,
+           SUM(p.amount) AS total_paid
+    FROM orders o
+    JOIN payments p ON o.order_id = p.order_id
+    GROUP BY o.customer_id
+)
+SELECT c.customer_id,
+       c.name,
+       NVL(ot.total_ordered,0) AS total_ordered,
+       NVL(pt.total_paid,0) AS total_paid
+FROM customers c
+LEFT JOIN order_totals ot ON c.customer_id = ot.customer_id
+LEFT JOIN payment_totals pt ON c.customer_id = pt.customer_id;
+
+
+-- 8. List orders where the payment amount is less than the order value.
+
+SELECT o.order_id,
+       SUM(oi.quantity * p.price) AS total_order_value,
+       NVL(SUM(pay.amount),0) AS total_paid
+FROM orders o
+JOIN order_items oi ON o.order_id = oi.order_id
+JOIN products p ON oi.product_id = p.product_id
+LEFT JOIN payments pay ON o.order_id = pay.order_id
+GROUP BY o.order_id
+HAVING NVL(SUM(pay.amount),0) < SUM(oi.quantity * p.price);
+
+
+-- 9. Identify products that appear in orders but have zero inventory.
+
+SELECT DISTINCT p.product_id, p.product_name
+FROM products p
+JOIN order_items oi ON p.product_id = oi.product_id
+JOIN inventory i ON p.product_id = i.product_id
+WHERE i.quantity_on_hand = 0;
+
+
+-- 10. Find all orders where every product in the order has quantity_on_hand < 20.
+
+SELECT oi.order_id
+FROM order_items oi
+JOIN inventory i ON oi.product_id = i.product_id
+GROUP BY oi.order_id
+HAVING MAX(i.quantity_on_hand) < 20;
+
+-- 11. List customers who ordered a product before its inventory was last updated.
+
+SELECT C.CUSTOMER_ID, C.NAME, O.ORDER_ID, O.ORDER_DATE, I.PRODUCT_ID, I.LAST_UPDATED
+FROM CUSTOMERS C
+JOIN ORDERS O ON C.CUSTOMER_ID = O.CUSTOMER_ID
+JOIN ORDER_ITEMS OI ON O.ORDER_ID = OI.ORDER_ID
+JOIN INVENTORY I ON OI.PRODUCT_ID = I.PRODUCT_ID
+WHERE O.ORDER_DATE < I.LAST_UPDATED;
+
+
+-- 12. Retrieve orders containing products from at least 3 different categories.
+
+SELECT o.order_id
+FROM orders o
+JOIN order_items oi ON o.order_id = oi.order_id
+JOIN products p ON oi.product_id = p.product_id
+GROUP BY o.order_id
+HAVING COUNT(DISTINCT
+    CASE
+        WHEN LOWER(p.product_name) LIKE '%laptop%' THEN 'LAPTOP'
+        WHEN LOWER(p.product_name) LIKE '%mouse%' THEN 'MOUSE'
+        WHEN LOWER(p.product_name) LIKE '%keyboard%' THEN 'KEYBOARD'
+        WHEN LOWER(p.product_name) LIKE '%monitor%' THEN 'MONITOR'
+        ELSE 'OTHER'
+    END
+) >= 3;
+
+
+-- 13. Find customers who placed orders in each month of a given year.
+
+SELECT C.CUSTOMER_ID, C.NAME
+FROM CUSTOMERS C
+JOIN ORDERS O ON C.CUSTOMER_ID = O.CUSTOMER_ID
+WHERE EXTRACT(YEAR FROM O.ORDER_DATE) = 2025
+GROUP BY C.CUSTOMER_ID, C.NAME
+HAVING COUNT(DISTINCT EXTRACT(MONTH FROM O.ORDER_DATE)) = 12;
+
+
+-- 14. List orders where the highest-priced item is the only item ordered.
+
+SELECT OI.ORDER_ID
+FROM ORDER_ITEMS OI
+JOIN PRODUCTS P ON OI.PRODUCT_ID = P.PRODUCT_ID
+GROUP BY OI.ORDER_ID
+HAVING COUNT(*) = 1
+AND MAX(P.PRICE) = (SELECT MAX(PRICE) FROM PRODUCTS);
+
+
+-- 15. Retrieve top 3 customers with the most distinct products ordered.
+
+SELECT CUSTOMER_ID, NAME, DISTINCT_PRODUCTS
+FROM (
+    SELECT C.CUSTOMER_ID, C.NAME,
+           COUNT(DISTINCT OI.PRODUCT_ID) AS DISTINCT_PRODUCTS,
+           DENSE_RANK() OVER (ORDER BY COUNT(DISTINCT OI.PRODUCT_ID) DESC) AS RNK
+    FROM CUSTOMERS C
+    JOIN ORDERS O ON C.CUSTOMER_ID = O.CUSTOMER_ID
+    JOIN ORDER_ITEMS OI ON O.ORDER_ID = OI.ORDER_ID
+    GROUP BY C.CUSTOMER_ID, C.NAME
+)
+WHERE RNK <= 3;
+
+
+-- 16. Identify payments made after 48 hours from order_date.
+
+SELECT P.PAYMENT_ID, P.ORDER_ID, O.ORDER_DATE, P.PAYMENT_DATE
+FROM PAYMENTS P
+JOIN ORDERS O ON P.ORDER_ID = O.ORDER_ID
+WHERE (P.PAYMENT_DATE - O.ORDER_DATE) > 2;
+
+
+-- 17. Find duplicate product purchases within the same order.
+
+SELECT ORDER_ID, PRODUCT_ID, COUNT(*) AS DUPLICATE_COUNT
+FROM ORDER_ITEMS
+GROUP BY ORDER_ID, PRODUCT_ID
+HAVING COUNT(*) > 1;
+
+
+-- 18. List products ordered consistently in quantities > 1.
+
+SELECT P.PRODUCT_ID, P.PRODUCT_NAME
+FROM PRODUCTS P
+JOIN ORDER_ITEMS OI ON P.PRODUCT_ID = OI.PRODUCT_ID
+GROUP BY P.PRODUCT_ID, P.PRODUCT_NAME
+HAVING MIN(OI.QUANTITY) > 1;
+
+
+-- 19. Find inventory not used in orders for over 90 days.
+
+SELECT P.PRODUCT_ID, P.PRODUCT_NAME, I.QUANTITY_ON_HAND, I.LAST_UPDATED
+FROM PRODUCTS P
+JOIN INVENTORY I ON P.PRODUCT_ID = I.PRODUCT_ID
+WHERE P.PRODUCT_ID NOT IN (
+    SELECT OI.PRODUCT_ID
+    FROM ORDER_ITEMS OI
+    JOIN ORDERS O ON OI.ORDER_ID = O.ORDER_ID
+    WHERE O.ORDER_DATE >= SYSDATE - 90
+);
+
+
+-- 20. Identify orders where payment_method is NULL.
+
+SELECT ORDER_ID, PAYMENT_ID, AMOUNT, PAYMENT_METHOD
+FROM PAYMENTS
+WHERE PAYMENT_METHOD IS NULL;
+
+
+21. Using a CTE, compute total stock value for every product.
+
+WITH stock_value AS (
+    SELECT p.product_id,
+           p.product_name,
+           p.price,
+           i.quantity_on_hand,
+           (p.price * i.quantity_on_hand) AS total_value
+    FROM products p
+    JOIN inventory i
+    ON p.product_id = i.product_id
+)
+SELECT * 
+FROM stock_value;
+
+
+22. Build a CTE to calculate monthly sales and find above-average months.
+
+WITH monthly_sales AS (
+    SELECT TO_CHAR(o.order_date,'YYYY-MM') AS month,
+           SUM(p.price * oi.quantity) AS total_sales
+    FROM orders o
+    JOIN order_items oi ON o.order_id = oi.order_id
+    JOIN products p ON oi.product_id = p.product_id
+    GROUP BY TO_CHAR(o.order_date,'YYYY-MM')
+)
+SELECT *
+FROM monthly_sales
+WHERE total_sales > (SELECT AVG(total_sales) FROM monthly_sales);
+
+
+23. Generate calendar dates using recursive CTE and join with orders.
+
+WITH calendar_dates AS (
+SELECT DATE '2025-01-01'+LEVEL-1 dt
+FROM dual
+CONNECT BY LEVEL<=365
+)
+SELECT c.dt,o.order_id
+FROM calendar_dates c
+LEFT JOIN orders o
+ON c.dt=o.order_date;
+
+
+24. Categorize products into price tiers using CTE.
+
+WITH product_tiers AS (
+    SELECT product_id,
+           product_name,
+           price,
+           CASE
+               WHEN price < 5000 THEN 'Low Price'
+               WHEN price BETWEEN 5000 AND 30000 THEN 'Medium Price'
+               ELSE 'High Price'
+           END AS price_category
+    FROM products
+)
+SELECT * 
+FROM product_tiers;
+
+
+25. Using CTEs, create a customer purchase summary.
+
+WITH purchase_summary AS (
+    SELECT c.customer_id,
+           c.name,
+           COUNT(o.order_id) AS total_orders,
+           SUM(p.price * oi.quantity) AS total_spent
+    FROM customers c
+    JOIN orders o ON c.customer_id = o.customer_id
+    JOIN order_items oi ON o.order_id = oi.order_id
+    JOIN products p ON oi.product_id = p.product_id
+    GROUP BY c.customer_id, c.name
+)
+SELECT *
+FROM purchase_summary;
+
+
+26. Identify top 1% customers by spending using CTE.
+
+WITH spending AS (
+    SELECT c.customer_id,
+           c.name,
+           SUM(p.price * oi.quantity) AS total_spent
+    FROM customers c
+    JOIN orders o ON c.customer_id = o.customer_id
+    JOIN order_items oi ON o.order_id = oi.order_id
+    JOIN products p ON oi.product_id = p.product_id
+    GROUP BY c.customer_id, c.name
+)
+SELECT *
+FROM (
+    SELECT s.*,
+           PERCENT_RANK() OVER (ORDER BY total_spent DESC) AS pr
+    FROM spending s
+)
+WHERE pr <= 0.01;
+
+
+27. Find products with declining monthly order quantities.
+
+WITH monthly_orders AS (
+    SELECT product_id,
+           TO_CHAR(o.order_date,'YYYY-MM') AS month,
+           SUM(quantity) qty,
+           LAG(SUM(quantity)) OVER (
+               PARTITION BY product_id
+               ORDER BY TO_CHAR(o.order_date,'YYYY-MM')
+           ) AS prev_qty
+    FROM order_items oi
+    JOIN orders o ON oi.order_id = o.order_id
+    GROUP BY product_id, TO_CHAR(o.order_date,'YYYY-MM')
+)
+SELECT *
+FROM monthly_orders
+WHERE qty < prev_qty;
+
+28. Find inventory gaps using CTE to compare ordered vs on-hand quantities.
+
+WITH ordered_qty AS (
+    SELECT product_id,
+           SUM(quantity) AS total_ordered
+    FROM order_items
+    GROUP BY product_id
+)
+SELECT p.product_name,
+       i.quantity_on_hand,
+       o.total_ordered
+FROM ordered_qty o
+JOIN inventory i ON o.product_id = i.product_id
+JOIN products p ON p.product_id = o.product_id
+WHERE o.total_ordered > i.quantity_on_hand;
+
+
+29. Compute running total of payments per customer using CTE.
+
+WITH customer_payments AS (
+    SELECT c.customer_id,
+           c.name,
+           p.payment_date,
+           p.amount
+    FROM customers c
+    JOIN orders o ON c.customer_id = o.customer_id
+    JOIN payments p ON o.order_id = p.order_id
+)
+SELECT customer_id,
+       name,
+       payment_date,
+       amount,
+       SUM(amount) OVER
+       (PARTITION BY customer_id ORDER BY payment_date) AS running_total
+FROM customer_payments;
+
+
+30. Identify products that go out of stock after orders.
+
+WITH total_orders AS (
+    SELECT product_id,
+           SUM(quantity) AS ordered_qty
+    FROM order_items
+    GROUP BY product_id
+)
+SELECT p.product_name,
+       i.quantity_on_hand,
+       t.ordered_qty
+FROM total_orders t
+JOIN inventory i ON t.product_id = i.product_id
+JOIN products p ON p.product_id = t.product_id
+WHERE i.quantity_on_hand - t.ordered_qty <= 0;
+
+
+-- 31. Flag orders without payments using CTE.
+
+WITH unpaid_orders AS (
+    SELECT o.order_id, o.customer_id, o.order_date
+    FROM orders o
+    LEFT JOIN payments p ON o.order_id = p.order_id
+    WHERE p.order_id IS NULL
+)
+SELECT * FROM unpaid_orders;
+
+
+-- 32. Compute average fulfillment time using CTE.
+
+WITH fulfillment_time AS (
+    SELECT o.order_id,
+           (p.payment_date - o.order_date) AS fulfillment_days
+    FROM orders o
+    JOIN payments p ON o.order_id = p.order_id
+)
+SELECT AVG(fulfillment_days) AS avg_fulfillment_time
+FROM fulfillment_time;
+
+
+-- 33. Track duplicate ordered products using CTE.
+
+WITH duplicate_products AS (
+    SELECT order_id,
+           product_id,
+           COUNT(*) AS product_count
+    FROM order_items
+    GROUP BY order_id, product_id
+    HAVING COUNT(*) > 1
+)
+SELECT * FROM duplicate_products;
+
+
+-- 34. Bucket products into 5 equal price groups via CTE.
+
+WITH price_buckets AS (
+    SELECT product_id,
+           product_name,
+           price,
+           NTILE(5) OVER (ORDER BY price) AS price_group
+    FROM products
+)
+SELECT * FROM price_buckets;
+
+
+-- 35. Find orders that exceed twice the customer’s average order size.
+
+WITH order_totals AS (
+    SELECT o.order_id,
+           o.customer_id,
+           SUM(oi.quantity * p.price) AS order_value
+    FROM orders o
+    JOIN order_items oi ON o.order_id = oi.order_id
+    JOIN products p ON oi.product_id = p.product_id
+    GROUP BY o.order_id, o.customer_id
+),
+customer_avg AS (
+    SELECT customer_id,
+           AVG(order_value) AS avg_order_value
+    FROM order_totals
+    GROUP BY customer_id
+)
+SELECT ot.order_id, ot.customer_id, ot.order_value
+FROM order_totals ot
+JOIN customer_avg ca ON ot.customer_id = ca.customer_id
+WHERE ot.order_value > 2 * ca.avg_order_value;
+
+
+-- 36. Bucket products into 10 price bands and count orders.
+
+WITH price_bands AS (
+    SELECT product_id,
+           price,
+           NTILE(10) OVER (ORDER BY price) AS price_band
+    FROM products
+)
+SELECT pb.price_band,
+       COUNT(oi.order_id) AS total_orders
+FROM price_bands pb
+JOIN order_items oi ON pb.product_id = oi.product_id
+GROUP BY pb.price_band
+ORDER BY pb.price_band;
+
+
+-- 37. Group customers into spending buckets.
+
+WITH customer_spending AS (
+    SELECT c.customer_id,
+           c.name,
+           SUM(oi.quantity * p.price) AS total_spent
+    FROM customers c
+    JOIN orders o ON c.customer_id = o.customer_id
+    JOIN order_items oi ON o.order_id = oi.order_id
+    JOIN products p ON oi.product_id = p.product_id
+    GROUP BY c.customer_id, c.name
+)
+SELECT customer_id,
+       name,
+       total_spent,
+       NTILE(5) OVER (ORDER BY total_spent) AS spending_bucket
+FROM customer_spending;
+
+
+-- 38. Bucket orders into size categories.
+
+WITH order_sizes AS (
+    SELECT o.order_id,
+           SUM(oi.quantity * p.price) AS order_value
+    FROM orders o
+    JOIN order_items oi ON o.order_id = oi.order_id
+    JOIN products p ON oi.product_id = p.product_id
+    GROUP BY o.order_id
+)
+SELECT order_id,
+       order_value,
+       CASE
+           WHEN order_value < 5000 THEN 'SMALL'
+           WHEN order_value BETWEEN 5000 AND 20000 THEN 'MEDIUM'
+           ELSE 'LARGE'
+       END AS order_size_category
+FROM order_sizes;
+
+
+-- 39. Categorize payments based on amount buckets.
+
+SELECT payment_id,
+       order_id,
+       amount,
+       CASE
+           WHEN amount < 5000 THEN 'SMALL PAYMENT'
+           WHEN amount BETWEEN 5000 AND 20000 THEN 'MEDIUM PAYMENT'
+           ELSE 'LARGE PAYMENT'
+       END AS payment_category
+FROM payments;
+
+
+-- 40. Bucket products by inventory age.
+
+WITH inventory_age AS (
+    SELECT i.product_id,
+           p.product_name,
+           (SYSDATE - i.last_updated) AS age_days
+    FROM inventory i
+    JOIN products p ON i.product_id = p.product_id
+)
+SELECT product_id,
+       product_name,
+       age_days,
+       CASE
+           WHEN age_days < 30 THEN 'FRESH STOCK'
+           WHEN age_days BETWEEN 30 AND 90 THEN 'AGING STOCK'
+           ELSE 'OLD STOCK'
+       END AS inventory_category
+FROM inventory_age;
+
+
+-- 41. Create weekly sales buckets.
+
+SELECT 
+    TRUNC(o.order_date, 'IW') AS week_start,
+    COUNT(DISTINCT o.order_id) AS orders_in_week,
+    SUM(p.price * oi.quantity) AS total_sales,
+    CASE 
+        WHEN SUM(p.price * oi.quantity) > 50000 THEN 'High'
+        WHEN SUM(p.price * oi.quantity) > 20000 THEN 'Medium'
+        WHEN SUM(p.price * oi.quantity) > 5000 THEN 'Low'
+        ELSE 'Very Low'
+    END AS sales_bucket
+FROM orders o
+JOIN order_items oi ON o.order_id = oi.order_id
+JOIN products p ON oi.product_id = p.product_id
+GROUP BY TRUNC(o.order_date, 'IW')
+ORDER BY week_start;
+
+
+-- 42. Bucket customers by order-value distribution.
+
+WITH customer_totals AS (
+    SELECT c.customer_id,
+           c.name,
+           NVL(SUM(p.price * oi.quantity), 0) AS total_spent
+    FROM customers c
+    LEFT JOIN orders o ON c.customer_id = o.customer_id
+    LEFT JOIN order_items oi ON o.order_id = oi.order_id
+    LEFT JOIN products p ON oi.product_id = p.product_id
+    GROUP BY c.customer_id, c.name
+)
+SELECT name,
+       total_spent,
+       NTILE(5) OVER (ORDER BY total_spent DESC) AS spending_bucket
+FROM customer_totals;
+
+
+-- 43. Categorize products by sales frequency.
+
+WITH product_sales AS (
+    SELECT p.product_id,
+           p.product_name,
+           COUNT(oi.order_item_id) AS total_orders
+    FROM products p
+    LEFT JOIN order_items oi ON p.product_id = oi.product_id
+    GROUP BY p.product_id, p.product_name
+)
+SELECT product_name,
+       total_orders,
+       CASE 
+           WHEN total_orders = 0 THEN 'Never Sold'
+           WHEN total_orders >= 5 THEN 'High Demand'
+           WHEN total_orders >= 2 THEN 'Medium Demand'
+           ELSE 'Low Demand'
+       END AS sales_category
+FROM product_sales;
+
+
+-- 44. Bucket customers by average order gap.
+
+WITH order_gaps AS (
+    SELECT o.customer_id,
+           o.order_date,
+           o.order_date - LAG(o.order_date) OVER (
+               PARTITION BY o.customer_id ORDER BY o.order_date
+           ) AS gap_days
+    FROM orders o
+),
+avg_gaps AS (
+    SELECT customer_id,
+           AVG(gap_days) AS avg_gap
+    FROM order_gaps
+    GROUP BY customer_id
+)
+SELECT customer_id,
+       avg_gap,
+       CASE 
+           WHEN avg_gap <= 30 THEN 'Frequent'
+           WHEN avg_gap <= 90 THEN 'Regular'
+           ELSE 'Rare'
+       END AS gap_bucket
+FROM avg_gaps;
+
+
+-- 45. Rank customers by total ordered amount; return top 5 per email domain.
+
+WITH customer_totals AS (
+    SELECT c.customer_id,
+           c.name,
+           c.email,
+           SUM(p.price * oi.quantity) AS total_spent,
+           SUBSTR(c.email, INSTR(c.email, '@')) AS domain
+    FROM customers c
+    JOIN orders o ON c.customer_id = o.customer_id
+    JOIN order_items oi ON o.order_id = oi.order_id
+    JOIN products p ON oi.product_id = p.product_id
+    GROUP BY c.customer_id, c.name, c.email
+)
+SELECT name,
+       domain,
+       total_spent
+FROM (
+    SELECT *,
+           RANK() OVER (PARTITION BY domain ORDER BY total_spent DESC) AS rnk
+    FROM customer_totals
+)
+WHERE rnk <= 5;
+
+
+-- 46. Compute running total of sales per customer.
+
+SELECT c.customer_id,
+       o.order_id,
+       o.order_date,
+       SUM(p.price * oi.quantity) AS order_value,
+       SUM(SUM(p.price * oi.quantity)) OVER (
+           PARTITION BY c.customer_id
+           ORDER BY o.order_date
+       ) AS running_total
+FROM customers c
+JOIN orders o ON c.customer_id = o.customer_id
+JOIN order_items oi ON o.order_id = oi.order_id
+JOIN products p ON oi.product_id = p.product_id
+GROUP BY c.customer_id, o.order_id, o.order_date
+ORDER BY c.customer_id, o.order_date;
+
+
+-- 47. Find first and last orders using window functions.
+
+SELECT customer_id,
+       FIRST_VALUE(order_id) OVER (
+           PARTITION BY customer_id ORDER BY order_date
+       ) AS first_order,
+       FIRST_VALUE(order_id) OVER (
+           PARTITION BY customer_id ORDER BY order_date DESC
+       ) AS last_order
+FROM orders;
+
+
+-- 48. Calculate days between customer orders using LAG.
+
+SELECT customer_id,
+       order_id,
+       order_date,
+       order_date - LAG(order_date) OVER (
+           PARTITION BY customer_id ORDER BY order_date
+       ) AS days_gap
+FROM orders;
+
+
+-- 49. Identify top-selling product per month using RANK.
+
+WITH monthly_sales AS (
+    SELECT TO_CHAR(o.order_date, 'YYYY-MM') AS month,
+           p.product_name,
+           SUM(oi.quantity) AS total_qty,
+           RANK() OVER (
+               PARTITION BY TO_CHAR(o.order_date, 'YYYY-MM')
+               ORDER BY SUM(oi.quantity) DESC
+           ) AS rnk
+    FROM orders o
+    JOIN order_items oi ON o.order_id = oi.order_id
+    JOIN products p ON oi.product_id = p.product_id
+    GROUP BY TO_CHAR(o.order_date, 'YYYY-MM'), p.product_name
+)
+SELECT month, product_name, total_qty
+FROM monthly_sales
+WHERE rnk = 1;
+
+
+-- 50. Compute moving average of product quantities.
+
+SELECT product_id,
+       quantity,
+       AVG(quantity) OVER (
+           PARTITION BY product_id
+           ORDER BY order_item_id
+           ROWS BETWEEN 2 PRECEDING AND CURRENT ROW
+       ) AS moving_avg
+FROM order_items;
+
+-- 51. Detect customers who stopped purchasing for 60 days via LEAD.
+
+SELECT customer_id,
+       order_date,
+       next_order_date,
+       gap_days
+FROM (
+    SELECT customer_id,
+           order_date,
+           LEAD(order_date) OVER (PARTITION BY customer_id ORDER BY order_date) AS next_order_date,
+           LEAD(order_date) OVER (PARTITION BY customer_id ORDER BY order_date) - order_date AS gap_days
+    FROM orders
+)
+WHERE gap_days > 60;
+
+
+-- 52. Calculate percentage contribution of each item to order total.
+
+SELECT oi.order_id,
+       oi.product_id,
+       (oi.quantity * p.price) AS item_value,
+       SUM(oi.quantity * p.price) OVER (PARTITION BY oi.order_id) AS order_total,
+       ROUND(
+           (oi.quantity * p.price) /
+           SUM(oi.quantity * p.price) OVER (PARTITION BY oi.order_id) * 100, 2
+       ) AS percentage_contribution
+FROM order_items oi
+JOIN products p ON oi.product_id = p.product_id;
+
+
+-- 53. Dense-rank products by total quantity sold.
+
+SELECT product_id,
+       total_quantity,
+       DENSE_RANK() OVER (ORDER BY total_quantity DESC) AS rank_position
+FROM (
+    SELECT product_id,
+           SUM(quantity) AS total_quantity
+    FROM order_items
+    GROUP BY product_id
+);
+
+
+-- 54. Compute cumulative payments per order and find unpaid ones.
+
+WITH payment_cumulative AS (
+    SELECT order_id,
+           payment_date,
+           amount,
+           SUM(amount) OVER (
+               PARTITION BY order_id ORDER BY payment_date
+           ) AS cumulative_payment
+    FROM payments
+)
+SELECT * FROM payment_cumulative;
+
+-- Unpaid orders
+SELECT o.order_id
+FROM orders o
+LEFT JOIN payments p ON o.order_id = p.order_id
+WHERE p.order_id IS NULL;
+
+
+-- 55. Identify second most purchased product per customer using window functions.
+
+SELECT customer_id,
+       product_id,
+       total_quantity
+FROM (
+    SELECT o.customer_id,
+           oi.product_id,
+           SUM(oi.quantity) AS total_quantity,
+           ROW_NUMBER() OVER (
+               PARTITION BY o.customer_id
+               ORDER BY SUM(oi.quantity) DESC
+           ) AS rnk
+    FROM orders o
+    JOIN order_items oi ON o.order_id = oi.order_id
+    GROUP BY o.customer_id, oi.product_id
+)
+WHERE rnk = 2;
+
+
+-- 56. Rank customers per product by quantity purchased.
+
+SELECT product_id,
+       customer_id,
+       total_quantity,
+       RANK() OVER (
+           PARTITION BY product_id
+           ORDER BY total_quantity DESC
+       ) AS rank_position
+FROM (
+    SELECT o.customer_id,
+           oi.product_id,
+           SUM(oi.quantity) AS total_quantity
+    FROM orders o
+    JOIN order_items oi ON o.order_id = oi.order_id
+    GROUP BY o.customer_id, oi.product_id
+);
+
+
+-- 57. Find orders above the 90th percentile in value.
+
+WITH order_values AS (
+    SELECT oi.order_id,
+           SUM(oi.quantity * p.price) AS order_value
+    FROM order_items oi
+    JOIN products p ON oi.product_id = p.product_id
+    GROUP BY oi.order_id
+)
+SELECT order_id, order_value
+FROM order_values
+WHERE order_value >
+(
+    SELECT PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY order_value)
+    FROM order_values
+);
+
+
+-- 58. Split customers into quartiles based on spending.
+
+WITH customer_spending AS (
+    SELECT o.customer_id,
+           SUM(oi.quantity * p.price) AS total_spending
+    FROM orders o
+    JOIN order_items oi ON o.order_id = oi.order_id
+    JOIN products p ON oi.product_id = p.product_id
+    GROUP BY o.customer_id
+)
+SELECT customer_id,
+       total_spending,
+       NTILE(4) OVER (ORDER BY total_spending DESC) AS spending_quartile
+FROM customer_spending;
+
+
+
