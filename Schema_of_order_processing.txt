@@ -1,0 +1,19 @@
+## CREATING NEW SCHEMA ORDER_PROCESSING SET PASSWORD "LION"
+
+SQL> conn
+Enter user-name: sys/lion as sysdba
+Connected.
+SQL> CREATE USER order_processing IDENTIFIED BY lion
+  2      DEFAULT TABLESPACE users
+  3      TEMPORARY TABLESPACE temp
+  4      QUOTA UNLIMITED ON users;
+
+User created.
+
+SQL> GRANT CONNECT, RESOURCE TO order_processing;
+
+Grant succeeded.
+
+SQL> conn
+Enter user-name: order_processing/lion
+Connected.
